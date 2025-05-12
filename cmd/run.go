@@ -11,23 +11,25 @@ import (
 )
 
 var names []string
+var detach bool
 
 var runCmd = &cobra.Command{
 	Use:   "run [commands...]",
 	Short: "Run multiple shell commands concurrently",
 	Args:  cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		runCommands(args, names)
+		runCommands(args, names, detach)
 	},
 }
 
 func init() {
 	runCmd.Flags().StringSliceVarP(&names, "name", "n", nil, "Names for each command (ex: --name api,test)")
+	runCmd.Flags().BoolVarP(&detach, "detach", "d", false, "Run commands in background")
+
 	rootCmd.AddCommand(runCmd)
 }
 
-func runCommands(commands []string, names []string) {
-	var wg sync.WaitGroup
+func runCommands(commands []string, names []string, detach bool) {
 	colors := []func(a ...interface{}) string{
 		color.New(color.FgCyan).SprintFunc(),
 		color.New(color.FgGreen).SprintFunc(),
@@ -36,6 +38,8 @@ func runCommands(commands []string, names []string) {
 		color.New(color.FgBlue).SprintFunc(),
 		color.New(color.FgHiRed).SprintFunc(),
 	}
+
+	var wg sync.WaitGroup
 
 	for i, cmdStr := range commands {
 		wg.Add(1)
@@ -67,5 +71,7 @@ func runCommands(commands []string, names []string) {
 		}(cmdStr, name, colorFunc)
 	}
 
-	wg.Wait()
+	if !detach {
+		wg.Wait()
+	}
 }
