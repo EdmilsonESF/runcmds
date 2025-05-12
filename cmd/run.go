@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"bufio"
+	"context"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
-	"strings"
 	"sync"
 
 	"github.com/fatih/color"
@@ -11,25 +14,23 @@ import (
 )
 
 var names []string
-var detach bool
 
 var runCmd = &cobra.Command{
 	Use:   "run [commands...]",
 	Short: "Run multiple shell commands concurrently",
 	Args:  cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		runCommands(args, names, detach)
+		runCommands(args, names)
 	},
 }
 
 func init() {
 	runCmd.Flags().StringSliceVarP(&names, "name", "n", nil, "Names for each command (ex: --name api,test)")
-	runCmd.Flags().BoolVarP(&detach, "detach", "d", false, "Run commands in background")
 
 	rootCmd.AddCommand(runCmd)
 }
 
-func runCommands(commands []string, names []string, detach bool) {
+func runCommands(commands []string, names []string) {
 	colors := []func(a ...interface{}) string{
 		color.New(color.FgCyan).SprintFunc(),
 		color.New(color.FgGreen).SprintFunc(),
@@ -39,7 +40,11 @@ func runCommands(commands []string, names []string, detach bool) {
 		color.New(color.FgHiRed).SprintFunc(),
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	var wg sync.WaitGroup
+	errChan := make(chan error, len(commands))
 
 	for i, cmdStr := range commands {
 		wg.Add(1)
@@ -54,24 +59,36 @@ func runCommands(commands []string, names []string, detach bool) {
 			defer wg.Done()
 			prefix := colorize("[" + name + "]")
 
+			cmd := exec.CommandContext(ctx, "sh", "-c", command)
+			stdout, _ := cmd.StdoutPipe()
+			stderr, _ := cmd.StderrPipe()
+
 			fmt.Printf("%s Starting: %s\n", prefix, command)
 
-			cmd := exec.Command("sh", "-c", command)
-			output, err := cmd.CombinedOutput()
+			if err := cmd.Start(); err != nil {
+				errChan <- fmt.Errorf("%s failed to start: %w", prefix, err)
+				cancel()
+			}
 
-			for _, line := range strings.Split(string(output), "\n") {
-				if strings.TrimSpace(line) != "" {
-					fmt.Printf("%s %s\n", prefix, line)
+			logPipe := func(pipe *io.ReadCloser) {
+				scanner := bufio.NewScanner(*pipe)
+				for scanner.Scan() {
+					fmt.Printf("%s %s\n", prefix, scanner.Text())
 				}
 			}
 
-			if err != nil {
-				fmt.Printf("%s Erro: %v\n", prefix, err)
-			}
+			logPipe(&stdout)
+			logPipe(&stderr)
 		}(cmdStr, name, colorFunc)
 	}
 
-	if !detach {
+	go func() {
 		wg.Wait()
+		close(errChan)
+	}()
+
+	if err, ok := <-errChan; ok {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 }
