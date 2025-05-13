@@ -3,6 +3,7 @@ module github.com/EdmilsonESF/runcmds
 go 1.24.1
 
 require (
+	github.com/creack/pty v1.1.24
 	github.com/fatih/color v1.18.0
 	github.com/spf13/cobra v1.9.1
 )

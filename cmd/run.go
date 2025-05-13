@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"sync"
 
+	"github.com/creack/pty"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
@@ -63,22 +64,32 @@ func runCommands(commands []string, names []string) {
 			stdout, _ := cmd.StdoutPipe()
 			stderr, _ := cmd.StderrPipe()
 
-			fmt.Printf("%s Starting: %s\n", prefix, command)
-
-			if err := cmd.Start(); err != nil {
-				errChan <- fmt.Errorf("%s failed to start: %w", prefix, err)
-				cancel()
+			pty, err := pty.Start(cmd)
+			if err != nil {
+				fmt.Printf("%s Error starting command: %v\n", prefix, err)
+				errChan <- err
+				return
 			}
+			defer pty.Close()
 
-			logPipe := func(pipe *io.ReadCloser) {
-				scanner := bufio.NewScanner(*pipe)
+			logPipe := func(pipe io.ReadCloser, prefix string) {
+				defer pipe.Close()
+				scanner := bufio.NewScanner(pipe)
 				for scanner.Scan() {
 					fmt.Printf("%s %s\n", prefix, scanner.Text())
 				}
+				if err := scanner.Err(); err != nil {
+					fmt.Printf("%s Error reading pipe: %v\n", prefix, err)
+				}
 			}
 
-			logPipe(&stdout)
-			logPipe(&stderr)
+			go logPipe(stdout, prefix)
+			go logPipe(stderr, prefix)
+
+			if err := cmd.Wait(); err != nil {
+				fmt.Printf("%s Command failed: %v\n", prefix, err)
+				errChan <- err
+			}
 		}(cmdStr, name, colorFunc)
 	}
 
@@ -88,7 +99,7 @@ func runCommands(commands []string, names []string) {
 	}()
 
 	if err, ok := <-errChan; ok {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
 }
