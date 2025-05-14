@@ -9,8 +9,7 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "runcmds",
-	Short: "A brief description of your application",
-	Long:  `A longer description`,
+	Short: "CLI to run multiple commands in parallel (use 'runcmds run')",
 }
 
 func Execute() {
